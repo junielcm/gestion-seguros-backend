@@ -89,8 +89,14 @@ backend/
 │
 ├── seed_test_users.py         # Script: crea usuarios de prueba
 ├── seed_clinics.py            # Script: crea clínicas de ejemplo
+├── setup_demo.py              # Script: prepara todo (migraciones + datos demo)
 ├── media/                     # Archivos subidos (comprobantes, récipes)
-└── manage.py                  # Comando de gestión de Django
+├── manage.py                  # Comando de gestión de Django
+├── Dockerfile                 # Imagen del backend (gunicorn, usuario no-root)
+├── .dockerignore              # Exclusiones del contexto de build
+├── entrypoint.sh              # Arranque: migrate + collectstatic + demo + gunicorn
+├── requirements.txt           # Dependencias (incluye gunicorn)
+└── .env.example               # Plantilla de variables de entorno
 ```
 
 ---
@@ -271,11 +277,67 @@ El sistema implementa Control de Acceso Basado en Roles con 7 roles definidos:
 
 ---
 
-## Instalación y Configuración
+## Ejecución con Docker (recomendado)
+
+El backend se empaqueta en un `Dockerfile` y se orquesta con el frontend
+mediante un `docker-compose.yml` en la carpeta del proyecto. Guía completa en
+**[DOCKER.md](../DOCKER.md)**.
+
+```bash
+# Levanta backend + frontend + base de datos con un solo comando
+docker compose up -d --build
+
+# App:      http://localhost:8080
+# Admin:    http://localhost:8080/admin/
+# API:      http://localhost:8080/api/v1/
+```
+
+La imagen usa `python:3.13-slim` y corre como usuario sin privilegios
+(`appuser`), no como root. El proceso es **gunicorn**, no el servidor de
+desarrollo de Django.
+
+### Qué pasa al arrancar
+
+`entrypoint.sh` se ejecuta en cada `docker compose up`, en este orden:
+
+1. Espera a la base de datos (solo si hay `DB_HOST`; con SQLite no espera).
+2. `python manage.py migrate` — aplica las migraciones pendientes.
+3. `python manage.py collectstatic` — deja los estáticos del admin en el
+   volumen que nginx lee.
+4. `python setup_demo.py` — carga clínicas, servicios, usuarios y la póliza de
+   prueba. Se activa con `LOAD_DEMO_DATA=true` (por defecto). Es idempotente,
+   así que no duplica nada en reinicios posteriores.
+5. `gunicorn` en `0.0.0.0:8000` con varios workers.
+
+Los datos persisten en volúmenes con nombre, así que sobreviven a
+`docker compose down` y a los reinicios de Docker.
+
+### Variables de entorno
+
+`config/settings.py` lee todo de `os.environ` con valores por defecto pensados
+para el desarrollo local, así que el proyecto arranca sin configurar nada y
+Docker solo sobrescribe lo que necesita:
+
+| Variable | Por defecto | Para qué |
+|---|---|---|
+| `DEBUG` | `False` en Docker | Modo depuración. No lo actives en producción |
+| `SECRET_KEY` | clave insegura | **Cámbiala antes de desplegar** |
+| `ALLOWED_HOSTS` | `*` | Dominios permitidos, separados por comas |
+| `DB_ENGINE` | `django.db.backends.sqlite3` | Motor de base de datos |
+| `DB_NAME` | `/app/data/db.sqlite3` | Ruta de la base de datos |
+| `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` | vacíos | Solo para PostgreSQL |
+| `MEDIA_ROOT` | `BASE_DIR/media` | Carpeta de archivos subidos |
+| `STATIC_ROOT` | `BASE_DIR/staticfiles` | Salida de `collectstatic` |
+| `CORS_ALLOWED_ORIGINS` | vacío | Orígenes permitidos si separas dominios |
+| `GUNICORN_WORKERS` | `3` | Nº de workers de gunicorn |
+
+---
+
+## Instalación y Configuración (sin Docker)
 
 ### Prerrequisitos
 
-- Python 3.10+
+- Python 3.12+ (Django 6.1 lo requiere)
 - pip (gestor de paquetes)
 
 > **Nota:** PostgreSQL NO es obligatorio. El proyecto usa SQLite por defecto (sin configuración). Si deseas usar PostgreSQL, descomenta las líneas en el archivo `.env`.
@@ -347,6 +409,26 @@ psql -U postgres -c "CREATE DATABASE gestion_seguros_db;"
 # 4. Aplicar migraciones
 python manage.py migrate
 ```
+
+> **Sobre el archivo `.env`:** Django no lee archivos `.env` por sí solo. El
+> proyecto lo carga si instalas la librería correspondiente:
+>
+> ```bash
+> pip install python-dotenv
+> ```
+>
+> Sin ella, el `.env` se ignora y el proyecto arranca con los valores por
+> defecto. Para poner las variables sin instalar nada, defínelas en la terminal:
+>
+> ```bash
+> export DB_ENGINE=django.db.backends.postgresql
+> export DB_NAME=gestion_seguros_db
+> export DB_USER=postgres
+> export DB_PASSWORD=tu_password
+> python manage.py migrate
+> ```
+>
+> En Windows PowerShell se usan `$env:NOMBRE = "valor"`.
 
 La API estará disponible en: `http://127.0.0.1:8000/api/`
 El panel de administración en: `http://127.0.0.1:8000/admin/`

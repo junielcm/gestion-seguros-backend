@@ -1,0 +1,44 @@
+# Contexto de build: excluir todo lo que no se necesita dentro de la imagen.
+# Cuanto más pequeño el contexto, más rápido el `docker build`.
+
+# Entorno virtual (la imagen instala sus propias dependencias)
+venv/
+env/
+ENV/
+.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+
+# Credenciales (NUNCA deben entrar en la imagen)
+.env
+.env.*
+!.env.example
+
+# Base de datos local: en Docker vive en el volumen /app/data
+db.sqlite3
+*.sqlite3
+*.sqlite3-journal
+
+# Archivos multimedia subidos: en Docker viven en el volumen /app/media
+media/
+
+# collectstatic se ejecuta en el entrypoint sobre /app/staticfiles
+staticfiles/
+
+# Git y editores
+.git/
+.gitignore
+.vscode/
+.idea/
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile
+.dockerignore
